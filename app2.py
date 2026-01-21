@@ -107,23 +107,36 @@ def generate_chat_response(chat_history, patient_name, patient_dob):
     models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-3-flash-preview"]
     greeting = get_time_based_greeting()
 
+    # ★ここが今回の変更点：テンポアップ指示を追加
     SYSTEM_PROMPT = f"""
     あなたは整形外科クリニックのAI問診担当「那須乃アイ」です。
     本日は {today_str} です。
-    患者：{patient_name} ({patient_dob}) ※取得済み
+    患者：{patient_name} ({patient_dob})
 
-    【タスク】
-    患者の主訴、発症時期、原因、経過（現病歴）を聴取してください。
-    
-    【重要ルール】
-    1. 挨拶＆初診確認：「{patient_name}さん、{greeting}。那須乃あいです...当院へのご来院は初めてですか？」から開始。
-    2. 症状の聴取が十分に終わったら、**これ以上質問せず**、以下の終了合図のみを出力してください。
+    【問診の進行ルール】
+    1. **挨拶＆初診確認**: 
+       最初の発言で「{patient_name}さん、{greeting}。那須乃あいです...当院へのご来院は初めてですか？」と挨拶と質問をまとめて行います（これは自動で行われるため、あなたは続きから対応します）。
+
+    2. **症状の聞き出し**:
+       「本日はどういった症状でご来院されましたか？」と聞く際、**必ず以下の注意書きを付け加えてください**。
+       『一番困っている症状から順に教えてください。例えば右肩の痛み、腰の痛み、左足のしびれなどを順に教えて下さい。左右がある場合は必ず右か左かも教えて下さい。』
+
+    3. **詳細聴取（マシンガン問診モード）**:
+       患者が複数の症状（例：右肩と腰）を挙げた場合、**「どちらから聞きますか？」といった確認は一切不要です**。
+       即座に1つ目の症状（一番困っているもの）について、発症時期・原因・増悪因子などを深掘りしてください。
+       1つ目が終わったら、**許可を取らずに**「次に、〇〇についてですが」と2つ目の症状の聴取に移ってください。
+
+    4. **まとめ確認**:
+       全ての症状について聞き終わったら、簡単な箇条書きでまとめを提示し、「この内容でよろしいですか？」と確認してください。
+       
+    5. **終了**:
+       患者が「はい」「大丈夫」と答えたら、以下の終了合図のみを出力してください。
        出力： <END_OF_INTERVIEW>
-    3. **まだSOAPまとめは出力しないでください。**
-    4. 画像検査、骨粗鬆症検査、医師希望については**質問しないでください**（後で画面で入力します）。
 
-    【会話スタイル】
-    丁寧かつ簡潔に。1回の発言で質問は1つまで。
+    【禁止事項】
+    * 「次は腰について聞いてもよろしいですか？」という許可取り質問。
+    * まだまとめの確認が済んでいないのに <END_OF_INTERVIEW> を出すこと。
+    * 画像検査や医師希望などの質問（これらは後の画面で行います）。
     """
     
     gemini_history = [{"role": "model" if m["role"]=="assistant" else "user", "parts": [m["content"]]} for m in chat_history]
@@ -149,6 +162,7 @@ def generate_final_soap(chat_history, patient_name, patient_dob, selection_data)
     - 医師希望: {selection_data['doctor']}
     """
 
+    # ★前回いただいたレイアウト指示を維持
     PROMPT = f"""
     これまでの会話履歴をもとに、整形外科の電子カルテ用SOAP（S部分）を作成し、
     最後に以下の患者希望情報（P部分）を結合して出力してください。
@@ -160,19 +174,22 @@ def generate_final_soap(chat_history, patient_name, patient_dob, selection_data)
     Markdownコードブロックは使用しないこと。
 
     ### 1. 日付記載の絶対ルール (基準日: {today_str})
-    * 相対日付（昨日、2週間前など）は必ず {today_str} から逆算した「yyyy/mm/dd」形式に変換。
-    * 「1週間前」「昨日」などの言葉は禁止。
-    * 1ヶ月前→「yyyy/mm月上旬/中旬/下旬」
-    * 半年以上前→「yyyy/mm月下旬頃」または年単位
+    すべての相対的な日付表現は、**「出力を行った当日（{today_str}）」を基準日**として、以下の形式で具体的な日付に変換して記載すること。
+    * **基準:** 本日（{today_str}）
+    * **昨日:** 正確な日付で記載（例: yyyy/mm/dd）
+    * **2週間前:** 14日前を計算して「yyyy/mm/dd頃」とする（例: yyyy/mm/dd頃）
+    * **1ヶ月前:** 月単位の場合は「上旬/中旬/下旬」で表現（例: yyyy/mm月上旬頃）
+    * **半年以上前:** 「yyyy/mm月下旬頃」または年単位の経過として記載。
+    * **禁止事項:** 「1週間前」「数日前」「昨日」などの相対表現をそのまま出力に残さないこと。
 
     ### 2. 現病歴のレイアウト（主訴ごとにグループ化）
-    #1. (主訴)
-    yyyy/mm/dd (経過記述...)
+    #1. (主訴名)
+    yyyy/mm/dd (経過記述...必ず日付から始める)
     yyyy/mm/dd (受診理由...)
     
     (空行)
 
-    #2. (主訴)
+    #2. (主訴名)
     yyyy/mm/dd (経過記述...)
     ...
 
@@ -305,7 +322,7 @@ else:
                 st.rerun()
 
     else:
-        # --- 3. フォーム入力フェーズ (ここを大幅改良！) ---
+        # --- 3. フォーム入力フェーズ ---
         if st.session_state.interview_state == "form":
             st.divider()
             st.subheader("📋 最終確認")
@@ -313,7 +330,7 @@ else:
             with st.form("final_options"):
                 st.markdown("以下の項目を選択して、カルテを作成してください。")
                 
-                # --- 画像検査 ---
+                # 画像検査
                 st.markdown("#### 画像検査")
                 img_opt = st.radio(
                     "CTやMRIでの詳しい検査を希望されますか？", 
@@ -322,7 +339,7 @@ else:
                 st.caption("※当日の予約状況により、本日中に検査が受けられない場合もございます。あらかじめご了承ください。")
                 st.divider()
 
-                # --- 骨粗鬆症検査 ---
+                # 骨粗鬆症検査
                 st.markdown("#### 骨粗鬆症検査")
                 st.info("💡 60代以降の女性の方は、一度骨粗鬆症の検査を行うことをおすすめします。")
                 osteo_opt = st.radio(
@@ -332,20 +349,17 @@ else:
                 )
                 st.divider()
                 
-                # --- 医師希望 ---
+                # 医師希望
                 st.markdown("#### 医師希望")
                 doc_cat = st.radio(
                     "本日の診察を担当する医師にご希望の医師はございますか？",
                     ["手の専門医", "膝の専門医", "足関節、足部（膝から下）の専門医", "特に希望はない", "医師名を指定する"]
                 )
-                
-                # 名前指定の場合の入力欄
                 doc_name_input = st.text_input("医師名（※上記で「医師名を指定する」を選択した場合のみ記入）")
                 
                 st.divider()
                 
                 if st.form_submit_button("✅ カルテ作成"):
-                    # 医師名のロジック処理
                     if doc_cat == "医師名を指定する" and doc_name_input:
                         final_doc = f"指定あり: {doc_name_input}"
                     elif doc_cat == "医師名を指定する":
@@ -365,4 +379,9 @@ else:
                     st.session_state.messages.append({"role": "assistant", "content": final_soap})
                     st.session_state.interview_state = "complete" 
                     st.rerun()
+                        
+                    st.session_state.messages.append({"role": "assistant", "content": final_soap})
+                    st.session_state.interview_state = "complete" 
+                    st.rerun()
+
 
