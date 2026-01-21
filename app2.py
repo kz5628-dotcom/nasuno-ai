@@ -32,7 +32,7 @@ if "messages" not in st.session_state:
 if "audio_key" not in st.session_state:
     st.session_state.audio_key = 0
 if "interview_state" not in st.session_state:
-    st.session_state.interview_state = "chat" # chat, form, complete
+    st.session_state.interview_state = "chat" 
 
 # ==========================================
 #  関数定義群
@@ -107,7 +107,6 @@ def generate_chat_response(chat_history, patient_name, patient_dob):
     models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-3-flash-preview"]
     greeting = get_time_based_greeting()
 
-    # ★ここが今回の変更点：テンポアップ指示を追加
     SYSTEM_PROMPT = f"""
     あなたは整形外科クリニックのAI問診担当「那須乃アイ」です。
     本日は {today_str} です。
@@ -162,7 +161,7 @@ def generate_final_soap(chat_history, patient_name, patient_dob, selection_data)
     - 医師希望: {selection_data['doctor']}
     """
 
-    # ★前回いただいたレイアウト指示を維持
+    # ★今回の修正ポイント：現病歴のレイアウトを「主訴ごとのブロック」に強制
     PROMPT = f"""
     これまでの会話履歴をもとに、整形外科の電子カルテ用SOAP（S部分）を作成し、
     最後に以下の患者希望情報（P部分）を結合して出力してください。
@@ -182,16 +181,18 @@ def generate_final_soap(chat_history, patient_name, patient_dob, selection_data)
     * **半年以上前:** 「yyyy/mm月下旬頃」または年単位の経過として記載。
     * **禁止事項:** 「1週間前」「数日前」「昨日」などの相対表現をそのまま出力に残さないこと。
 
-    ### 2. 現病歴のレイアウト（主訴ごとにグループ化）
-    #1. (主訴名)
+    ### 2. 現病歴のレイアウト（主訴ごとに構造化）
+    必ず以下のフォーマットに従うこと。複数の症状がある場合は、#1, #2...と分けて記述する。
+    
+    #1. (主訴名1)
     yyyy/mm/dd (経過記述...必ず日付から始める)
     yyyy/mm/dd (受診理由...)
     
     (空行)
-
-    #2. (主訴名)
-    yyyy/mm/dd (経過記述...)
-    ...
+    
+    #2. (主訴名2)
+    yyyy/mm/dd (経過記述...必ず日付から始める)
+    yyyy/mm/dd (受診理由...)
 
     ### 出力テンプレート
     ---
@@ -202,8 +203,9 @@ def generate_final_soap(chat_history, patient_name, patient_dob, selection_data)
     #2. (体言止め)
 
     現病歴：
-    (上記レイアウトに従って記述)
-    (※各主訴ブロックの最終行は必ず以下のいずれかで締める)
+    (上記レイアウトに従って記述。症状が複数の場合は必ず #1. #2. と分けて記載すること)
+    
+    (※最終行は必ず以下のいずれかで締める)
     1. {today_str} 　症状が持続しているため当院を受診
     2. {today_str} 　症状が改善しないため当院を受診
     3. {today_str} 　症状が悪化してきたため当院を受診
@@ -245,6 +247,7 @@ if st.session_state.patient_data is None:
                     st.session_state.patient_data = extracted
                     st.session_state.messages = []
                     greeting = get_time_based_greeting()
+                    # ★ここで「とりあえず」になっていないか要チェックです！
                     initial_msg = f"{extracted['name']}さん、{greeting}。那須乃あいです。本日の問診を担当させていただきます。よろしくお願い致します。\n\n早速ですが、当院へのご来院は初めてですか？"
                     st.session_state.messages.append({"role": "assistant", "content": initial_msg})
                     st.rerun()
@@ -258,6 +261,7 @@ if st.session_state.patient_data is None:
                 st.session_state.patient_data = {"name": name, "dob": dob_str}
                 st.session_state.messages = []
                 greeting = get_time_based_greeting()
+                # ★ここもチェック！
                 initial_msg = f"{name}さん、{greeting}。那須乃あいです。本日の問診を担当させていただきます。よろしくお願い致します。\n\n早速ですが、当院へのご来院は初めてですか？"
                 st.session_state.messages.append({"role": "assistant", "content": initial_msg})
                 st.rerun()
@@ -379,9 +383,6 @@ else:
                     st.session_state.messages.append({"role": "assistant", "content": final_soap})
                     st.session_state.interview_state = "complete" 
                     st.rerun()
-                        
-                    st.session_state.messages.append({"role": "assistant", "content": final_soap})
-                    st.session_state.interview_state = "complete" 
-                    st.rerun()
+
 
 
